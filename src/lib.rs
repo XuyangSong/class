@@ -158,12 +158,19 @@ impl BinaryQF {
     }
 
     pub fn exp(&self, n: &BigInt) -> BinaryQF {
+        let t1 = time::now();
         let pari_qf = self.qf_to_pari_qf();
         let pari_n = bn_to_gen(n);
+        println!("time: {:?}", time::now() - t1);
 
+        // let t2 = time::now();
         let mut v = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+        let t2 = time::now();
         let pari_qf_exp = unsafe { nupow(pari_qf, pari_n, &mut v) };
+        println!("time: {:?}", time::now() - t2);
+        let t3 = time::now();
         let qf_exp = BinaryQF::pari_qf_to_qf(pari_qf_exp);
+        println!("time: {:?}", time::now() - t3);
         qf_exp
     }
     // gotoNonMax: outputs: f=phi_q^(-1)(F), a binary quadratic form of disc. delta*conductor^2
@@ -394,5 +401,16 @@ mod tests {
         let x = BigInt::sample(100);
         let f_exp = f.exp(&x);
         assert_eq!(f, f_exp);
+        let bytes = bincode::serialize(&f).unwrap();
+        println!("{:?}", bytes);
+        let de_bytes: BinaryQF = bincode::deserialize(&bytes).unwrap();
+        println!("{:?}", de_bytes);
+
+        let fstr = serde_json::to_string(&f).unwrap();
+        println!("{:?}", fstr);
+        let def: BinaryQF = serde_json::from_str(&fstr).unwrap();
+
+        println!("{:?}", def);
+        println!("{:?}", f);
     }
 }
