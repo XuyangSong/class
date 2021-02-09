@@ -67,9 +67,11 @@ pub struct ProofError;
 
 impl CLGroup {
     pub fn new_from_setup(lam: &usize, seed: &BigInt) -> Self {
-        let q = &FE::q();
+        let Q: BigInt = str::parse("4002409555221667393417789825735904156556882819939007885332058136124031650490837864442687629129015664037894272559787").unwrap();
+        let q = &Q;
         unsafe { pari_init(100000000, 2) };
         let mu = q.bit_length();
+        println!("q size: {}", mu);
         assert!(lam > &(mu + 2));
         let k = lam - mu;
         let two = BigInt::from(2);
@@ -428,6 +430,21 @@ pub fn encrypt(group: &CLGroup, public_key: &PK, m: &FE) -> (Ciphertext, SK) {
     )
 }
 
+pub fn encrypt_381(group: &CLGroup, public_key: &PK, q: &BigInt, m: &BigInt) -> (Ciphertext, SK) {
+    unsafe { pari_init(10000000, 2) };
+    let (r, R) = group.keygen();
+    let exp_f = BinaryQF::expo_f(q, &group.delta_q, m);
+    let h_exp_r = public_key.0.exp(&r.0);
+
+    (
+        Ciphertext {
+            c1: R.0,
+            c2: h_exp_r.compose(&exp_f).reduce(),
+        },
+        r,
+    )
+}
+
 pub fn encrypt_without_r(group: &CLGroup, m: &FE) -> (Ciphertext, SK) {
     unsafe { pari_init(10000000, 2) };
     let r = SK::from(BigInt::from(0));
@@ -587,6 +604,17 @@ pub fn decrypt(group: &CLGroup, secret_key: &SK, c: &Ciphertext) -> FE {
     ECScalar::from(&plaintext)
 }
 
+pub fn decrypt_381(group: &CLGroup, q: &BigInt, secret_key: &SK, c: &Ciphertext) -> BigInt {
+    unsafe { pari_init(10000000, 2) };
+    let c1_x = c.c1.exp(&secret_key.0);
+    let c1_x_inv = c1_x.inverse();
+    let tmp = c.c2.compose(&c1_x_inv).reduce();
+    let plaintext = BinaryQF::discrete_log_f(q, &group.delta_q, &tmp);
+    debug_assert!(plaintext < *q);
+    plaintext
+    // ECScalar::from(&plaintext)
+}
+
 /// Multiplies the encrypted value by `val`.
 pub fn eval_scal(c: &Ciphertext, val: &BigInt) -> Ciphertext {
     unsafe { pari_init(10000000, 2) };
@@ -739,5 +767,68 @@ mod test {
         group.gq.exp(&r_2);
         println!("time: {:?}", time::now() - t2);
         println!("r2 end: ");
+    }
+
+    #[test]
+    fn q_256_encrypt_and_decrypt() {
+        let group = CLGroup::new_from_setup(&1827, &str::parse(seed).unwrap());
+        let r_1 = BigInt::sample_below(&(&group.stilde * BigInt::from(2).pow(40)));
+        let t0 = time::now();
+        group.gq.exp(&r_1);
+        println!("exp time: {:?}", time::now() - t0);
+
+        let t1 = time::now();
+        let (secret_key, public_key) = group.keygen();
+        println!("keygen time: {:?}", time::now() - t1);
+
+        let message = FE::new_random();
+
+        let t2 = time::now();
+        let (ciphertext, _) = encrypt(&group, &public_key, &message);
+        println!("encrypt time: {:?}", time::now() - t2);
+
+        let t3 = time::now();
+        let plaintext = decrypt(&group, &secret_key, &ciphertext);
+        println!("decrypt time: {:?}", time::now() - t3);
+
+        assert_eq!(plaintext, message);
+
+
+        let ciphertext2 = ciphertext.clone();
+        let t4 = time::now();
+        eval_sum(&ciphertext, &ciphertext2);
+        println!("compose time: {:?}", time::now() - t4);
+    }
+
+    #[test]
+    fn q_381_encrypt_and_decrypt() {
+        let Q: BigInt = str::parse("4002409555221667393417789825735904156556882819939007885332058136124031650490837864442687629129015664037894272559787").unwrap();
+        let group = CLGroup::new_from_setup(&1827, &str::parse(seed).unwrap());
+        let r_1 = BigInt::sample_below(&(&group.stilde * BigInt::from(2).pow(40)));
+        let t0 = time::now();
+        group.gq.exp(&r_1);
+        println!("exp time: {:?}", time::now() - t0);
+
+        let t1 = time::now();
+        let (secret_key, public_key) = group.keygen();
+        println!("keygen time: {:?}", time::now() - t1);
+
+        let message = BigInt::sample_below(&BigInt::from(2).pow(380));
+
+        let t2 = time::now();
+        let (ciphertext, _) = encrypt_381(&group, &public_key, &Q, &message);
+        println!("encrypt time: {:?}", time::now() - t2);
+
+        let t3 = time::now();
+        let plaintext = decrypt_381(&group, &Q, &secret_key, &ciphertext);
+        println!("decrypt time: {:?}", time::now() - t3);
+
+        assert_eq!(plaintext, message);
+
+
+        let ciphertext2 = ciphertext.clone();
+        let t4 = time::now();
+        eval_sum(&ciphertext, &ciphertext2);
+        println!("compose time: {:?}", time::now() - t4);
     }
 }
